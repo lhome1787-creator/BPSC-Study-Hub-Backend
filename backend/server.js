@@ -59,6 +59,58 @@ app.get("/razorpay-test", async (req, res) => {
     }
 });
 
+// SLET Paid Access Check
+app.get("/check-access", async (req, res) => {
+
+    const email = req.query.email;
+
+    if (!email) {
+        return res.status(400).json({
+            access: false,
+            message: "Email is required"
+        });
+    }
+
+    try {
+
+        const { data, error } = await supabase
+            .from("paid_users")
+            .select("id")
+            .eq("email", email)
+            .eq("product", "SLET 2026 Test Series")
+            .limit(1);
+
+        if (error) {
+            console.error("❌ Access Check Error:", error);
+
+            return res.status(500).json({
+                access: false,
+                message: "Database check failed"
+            });
+        }
+
+        if (data && data.length > 0) {
+            return res.json({
+                access: true,
+                message: "SLET access granted"
+            });
+        }
+
+        return res.json({
+            access: false,
+            message: "Payment not found"
+        });
+
+    } catch (error) {
+
+        console.error(error);
+
+        return res.status(500).json({
+            access: false,
+            message: "Server error"
+        });
+    }
+});
 // Razorpay Webhook
 app.post("/webhook", async (req, res) => {
 
@@ -124,7 +176,7 @@ app.post("/webhook", async (req, res) => {
         console.log("Payment Link Data:", paymentLink);
         console.log("Payment Data:", payment);
 
-        const email = paymentLink?.customer?.email || null;
+        const email = payment?.email || paymentLink?.customer?.email || null;
 
         const paymentLinkId =
             paymentLink?.id || null;
