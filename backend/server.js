@@ -4,23 +4,32 @@ const express = require("express");
 const cors = require("cors");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
+const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
 
 app.use(cors());
 
-// Raw body भी save करेंगे, ताकि Razorpay signature verify हो सके
+// Raw body save करेंगे ताकि Razorpay signature verify हो सके
 app.use(express.json({
     verify: (req, res, buf) => {
         req.rawBody = buf;
     }
 }));
 
+// Razorpay
 const razorpay = new Razorpay({
     key_id: process.env.RAZORPAY_KEY_ID,
     key_secret: process.env.RAZORPAY_KEY_SECRET
 });
 
+// Supabase
+const supabase = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_SECRET_KEY
+);
+
+// Home
 app.get("/", (req, res) => {
     res.json({
         status: "success",
@@ -28,10 +37,10 @@ app.get("/", (req, res) => {
     });
 });
 
-// Test Razorpay connection
+// Razorpay test
 app.get("/razorpay-test", async (req, res) => {
     try {
-        const orders = await razorpay.orders.all({
+        await razorpay.orders.all({
             count: 1
         });
 
@@ -51,12 +60,15 @@ app.get("/razorpay-test", async (req, res) => {
 });
 
 // Razorpay Webhook
-app.post("/webhook", (req, res) => {
+app.post("/webhook", async (req, res) => {
 
     console.log("Razorpay webhook received");
 
-    const webhookSignature = req.headers["x-razorpay-signature"];
-    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    const webhookSignature =
+        req.headers["x-razorpay-signature"];
+
+    const webhookSecret =
+        process.env.RAZORPAY_WEBHOOK_SECRET;
 
     if (!webhookSignature || !webhookSecret) {
         console.log("Webhook signature or secret missing");
@@ -71,6 +83,14 @@ app.post("/webhook", (req, res) => {
         .createHmac("sha256", webhookSecret)
         .update(req.rawBody)
         .digest("hex");
+
+    // Signature length check
+    if (expectedSignature.length !== webhookSignature.length) {
+        return res.status(400).json({
+            status: "error",
+            message: "Invalid webhook signature"
+        });
+    }
 
     const isValid = crypto.timingSafeEqual(
         Buffer.from(expectedSignature),
@@ -90,13 +110,53 @@ app.post("/webhook", (req, res) => {
 
     console.log("Event:", req.body.event);
 
+    // Payment successful
     if (req.body.event === "payment_link.paid") {
+
         console.log("💰 Payment Link PAID");
 
-        console.log(
-            "Payment Link Data:",
-            req.body.payload?.payment_link
-        );
+        const paymentLink =
+            req.body.payload?.payment_link?.entity;
+
+        const payment =
+            req.body.payload?.payment?.entity;
+
+        console.log("Payment Link Data:", paymentLink);
+        console.log("Payment Data:", payment);
+
+        const email = paymentLink?.customer?.email || null;
+
+        const paymentLinkId =
+            paymentLink?.id || null;
+
+        const paymentId =
+            payment?.id || null;
+
+        const product = "SLET 2026 Test Series";
+
+        // Supabase में payment save करें
+        const { data, error } = await supabase
+            .from("paid_users")
+            .insert([
+                {
+                    email: email,
+                    payment_link_id: paymentLinkId,
+                    payment_id: paymentId,
+                    product: product
+                }
+            ])
+            .select();
+
+        if (error) {
+            console.error("❌ Supabase Error:", error);
+
+            return res.status(500).json({
+                status: "error",
+                message: "Payment received but database save failed"
+            });
+        }
+
+        console.log("✅ Payment saved in Supabase:", data);
     }
 
     res.status(200).json({
