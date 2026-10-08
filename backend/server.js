@@ -62,38 +62,70 @@ app.get("/razorpay-test", async (req, res) => {
 // SLET Paid Access Check
 app.get("/check-access", async (req, res) => {
 
-    const email = req.query.email;
+    const email = req.query.email?.trim().toLowerCase();
+    const paymentId = req.query.paymentId?.trim();
 
-    if (!email) {
+    if (!email && !paymentId) {
         return res.status(400).json({
             access: false,
-            message: "Email is required"
+            message: "Email or Payment ID is required"
         });
     }
 
     try {
 
-        const { data, error } = await supabase
-            .from("paid_users")
-            .select("id")
-            .eq("email", email)
-            .eq("product", "SLET 2026 Test Series")
-            .limit(1);
+        // Payment ID से check
+        if (paymentId) {
 
-        if (error) {
-            console.error("❌ Access Check Error:", error);
+            const { data, error } = await supabase
+                .from("paid_users")
+                .select("id")
+                .eq("payment_id", paymentId)
+                .eq("product", "SLET 2026 Test Series")
+                .limit(1);
 
-            return res.status(500).json({
-                access: false,
-                message: "Database check failed"
-            });
+            if (error) {
+                console.error("❌ Payment ID Access Check Error:", error);
+
+                return res.status(500).json({
+                    access: false,
+                    message: "Database check failed"
+                });
+            }
+
+            if (data && data.length > 0) {
+                return res.json({
+                    access: true,
+                    message: "SLET access granted"
+                });
+            }
         }
 
-        if (data && data.length > 0) {
-            return res.json({
-                access: true,
-                message: "SLET access granted"
-            });
+        // Email से check
+        if (email) {
+
+            const { data, error } = await supabase
+                .from("paid_users")
+                .select("id")
+                .eq("email", email)
+                .eq("product", "SLET 2026 Test Series")
+                .limit(1);
+
+            if (error) {
+                console.error("❌ Email Access Check Error:", error);
+
+                return res.status(500).json({
+                    access: false,
+                    message: "Database check failed"
+                });
+            }
+
+            if (data && data.length > 0) {
+                return res.json({
+                    access: true,
+                    message: "SLET access granted"
+                });
+            }
         }
 
         return res.json({
@@ -103,7 +135,7 @@ app.get("/check-access", async (req, res) => {
 
     } catch (error) {
 
-        console.error(error);
+        console.error("❌ Server Error:", error);
 
         return res.status(500).json({
             access: false,
